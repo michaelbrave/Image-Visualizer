@@ -6,19 +6,19 @@ import json
 from PIL import Image
 
 class ImageNode:
-    def __init__(self, image_path, x, y, radius=40):
+    def __init__(self, image_path, x, y):
+        self.image_path = image_path
         self.x = x
         self.y = y
-        self.vx = random.uniform(-1, 1)
-        self.vy = random.uniform(-1, 1)
-        self.radius = radius
-        self.base_radius = radius
-        self.anchored = False
+        self.vx = 0
+        self.vy = 0
         self.connections = set()
+        self.anchored = False
+        self.base_radius = 30
+        self.radius = self.base_radius
         self.hover_scale = 1.0
-
+        
         # Load and scale the image
-        self.image_path = image_path  # Save image path for saving/loading state
         self.original_image = Image.open(image_path)
         self.update_image()
 
@@ -41,24 +41,34 @@ class ImageNode:
             self.update_image()
 
 class NetworkVisualizer:
-    def __init__(self, width=800, height=600, save_file="network_state.json"):
+    def __init__(self, width=1000, height=1000, save_file="network_state.json"):
         pygame.init()
         self.width = width
         self.height = height
-        self.screen = pygame.display.set_mode((width, height), pygame.DROPFILE)
+        self.save_file = save_file
+        
+        # Initialize pygame display
+        self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE | pygame.DROPFILE)
         pygame.display.set_caption("Image Network Visualizer")
         
+        # Initialize core attributes
         self.nodes = []
+        self.clock = pygame.time.Clock()
         self.selected_node = None
         self.hover_node = None
-        self.clock = pygame.time.Clock()
-        self.save_file = save_file  # JSON file to save/load state
-
-        # Physics and UI parameters
-        self.spring_length = 100
-        self.spring_strength = 0.03
-        self.repulsion = 500
-        self.damping = 0.98
+        
+        # Add boundary parameters
+        self.padding = 50
+        self.min_window_size = (400, 400)
+        
+        # Physics parameters
+        self.spring_length = 150
+        self.spring_strength = 0.02
+        self.repulsion = 300
+        self.damping = 0.95
+        self.max_velocity = 10
+        
+        # UI parameters
         self.hover_scale = 1.3
         self.connection_radius = 60
         self.font = pygame.font.Font(None, 24)
@@ -103,7 +113,7 @@ class NetworkVisualizer:
                     "image_path": node.image_path,
                     "x": node.x,
                     "y": node.y,
-                    "anchored": node.anchored,  # Save anchored status
+                    "anchored": node.anchored,
                     "connections": [self.nodes.index(conn) for conn in node.connections]
                 }
                 for node in self.nodes
@@ -113,7 +123,6 @@ class NetworkVisualizer:
             json.dump(data, f)
         print(f"State saved to {self.save_file}")
 
-
     def load_state(self):
         try:
             with open(self.save_file, "r") as f:
@@ -122,16 +131,14 @@ class NetworkVisualizer:
             # Load nodes
             for node_data in data["nodes"]:
                 node = self.add_image(node_data["image_path"], node_data["x"], node_data["y"])
-                node.anchored = node_data.get("anchored", False)  # Restore anchored status
+                node.anchored = node_data.get("anchored", False)
             # Load connections
             for i, node_data in enumerate(data["nodes"]):
                 for conn_index in node_data["connections"]:
                     self.nodes[i].connections.add(self.nodes[conn_index])
-                    self.nodes[conn_index].connections.add(self.nodes[i])
             print(f"State loaded from {self.save_file}")
         except FileNotFoundError:
             print(f"No save file found at {self.save_file}")
-
 
     def find_node_at_pos(self, x, y):
         for node in self.nodes:
@@ -142,9 +149,17 @@ class NetworkVisualizer:
         return None
 
     def apply_forces(self):
+        # Skip physics if dragging a node
+        if self.selected_node:
+            return
+
         for node in self.nodes:
-            if node.anchored or node == self.selected_node:
+            if node.anchored:
                 continue
+
+            fx = fy = 0
+
+            # Apply spring forces from connections
             for connected_node in node.connections:
                 dx = connected_node.x - node.x
                 dy = connected_node.y - node.y
@@ -152,23 +167,34 @@ class NetworkVisualizer:
                 if distance == 0:
                     continue
                 force = (distance - self.spring_length) * self.spring_strength
-                node.vx += (dx / distance) * force
-                node.vy += (dy / distance) * force
-            if node != self.hover_node:
-                for other_node in self.nodes:
-                    if other_node != node and other_node != self.selected_node:
-                        dx = other_node.x - node.x
-                        dy = other_node.y - node.y
-                        distance = math.sqrt(dx * dx + dy * dy)
-                        if distance < 1:
-                            continue
-                        force = self.repulsion / (distance * distance)
-                        node.vx -= (dx / distance) * force
-                        node.vy -= (dy / distance) * force
-            node.vx *= self.damping
-            node.vy *= self.damping
-            node.x += node.vx
-            node.y += node.vy
+                fx += (dx / distance) * force
+                fy += (dy / distance) * force
+
+            # Apply repulsion forces from other nodes
+            for other_node in self.nodes:
+                if other_node != node:
+                    dx = other_node.x - node.x
+                    dy = other_node.y - node.y
+                    distance = math.sqrt(dx * dx + dy * dy)
+                    if distance < 1:
+                        continue
+                    force = self.repulsion / (distance * distance)
+                    fx -= (dx / distance) * force
+                    fy -= (dy / distance) * force
+
+            # Update velocity and position
+            node.vx = (node.vx + fx) * self.damping
+            node.vy = (node.vy + fy) * self.damping
+
+            # Limit velocity
+            speed = math.sqrt(node.vx * node.vx + node.vy * node.vy)
+            if speed > self.max_velocity:
+                node.vx = (node.vx / speed) * self.max_velocity
+                node.vy = (node.vy / speed) * self.max_velocity
+
+            # Update position with boundary checking
+            node.x = max(self.padding, min(self.width - self.padding, node.x + node.vx))
+            node.y = max(self.padding, min(self.height - self.padding, node.y + node.vy))
 
     def draw_instructions(self):
         y = 10
@@ -185,6 +211,12 @@ class NetworkVisualizer:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.VIDEORESIZE:
+                    width = max(event.w, self.min_window_size[0])
+                    height = max(event.h, self.min_window_size[1])
+                    self.width = width
+                    self.height = height
+                    self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE | pygame.DROPFILE)
                 elif event.type == pygame.DROPFILE:
                     image_path = event.file
                     self.add_image(image_path, mouse_x, mouse_y)
@@ -209,14 +241,17 @@ class NetworkVisualizer:
                     elif event.key == pygame.K_ESCAPE:
                         running = False
 
+            # Reset hover states
             self.hover_node = None
             for node in self.nodes:
                 node.set_hover_scale(1.0)
 
+            # Handle selected node
             if self.selected_node:
                 self.selected_node.x, self.selected_node.y = mouse_x, mouse_y
-                self.selected_node.vx = 0
-                self.selected_node.vy = 0
+                self.selected_node.vx = self.selected_node.vy = 0
+                
+                # Check for potential connections
                 for node in self.nodes:
                     if node != self.selected_node:
                         dx = mouse_x - node.x
@@ -227,21 +262,30 @@ class NetworkVisualizer:
                             self.selected_node.set_hover_scale(self.hover_scale)
                             break
 
+            # Update physics and draw
             self.apply_forces()
             self.screen.fill((255, 255, 255))
 
+            # Draw connections
             for node in self.nodes:
                 for connected_node in node.connections:
-                    pygame.draw.line(self.screen, (200, 200, 200), (node.x, node.y), (connected_node.x, connected_node.y), 2)
+                    pygame.draw.line(self.screen, (200, 200, 200), 
+                                  (int(node.x), int(node.y)), 
+                                  (int(connected_node.x), int(connected_node.y)), 2)
 
+            # Draw nodes
             for node in self.nodes:
-                pygame.draw.circle(self.screen, (240, 240, 240), (int(node.x), int(node.y)), int(node.radius))
+                pygame.draw.circle(self.screen, (240, 240, 240), 
+                                (int(node.x), int(node.y)), int(node.radius))
                 image_rect = node.image.get_rect(center=(int(node.x), int(node.y)))
                 self.screen.blit(node.image, image_rect)
+                
                 if node.anchored:
-                    pygame.draw.circle(self.screen, (0, 120, 255), (int(node.x), int(node.y)), int(node.radius + 2), 3)
+                    pygame.draw.circle(self.screen, (0, 120, 255), 
+                                    (int(node.x), int(node.y)), int(node.radius + 2), 3)
                 if node == self.selected_node:
-                    pygame.draw.circle(self.screen, (0, 255, 0), (int(node.x), int(node.y)), int(node.radius) + 2, 2)
+                    pygame.draw.circle(self.screen, (0, 255, 0), 
+                                    (int(node.x), int(node.y)), int(node.radius + 2), 2)
 
             self.draw_instructions()
             pygame.display.flip()
