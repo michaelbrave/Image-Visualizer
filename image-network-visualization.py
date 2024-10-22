@@ -6,16 +6,20 @@ import json
 from PIL import Image
 
 class ImageNode:
-    def __init__(self, image_path, x, y, radius=40):
-        self.x = x
-        self.y = y
-        self.vx = random.uniform(-1, 1)
-        self.vy = random.uniform(-1, 1)
-        self.radius = radius
-        self.base_radius = radius
-        self.anchored = False
-        self.connections = set()
-        self.hover_scale = 1.0
+    def __init__(self, width=800, height=600, save_file="network_state.json"):
+        pygame.init()
+        self.width = width
+        self.height = height
+        # Create a resizable window
+        self.screen = pygame.display.set_mode((self.width, self.height), pygame.RESIZABLE)
+        pygame.display.set_caption("Image Network Visualizer")
+        
+        # Other initializations
+        self.nodes = []
+        self.selected_node = None
+        self.hover_node = None
+        self.clock = pygame.time.Clock()
+        self.save_file = save_file
 
         # Load and scale the image
         self.image_path = image_path  # Save image path for saving/loading state
@@ -45,7 +49,7 @@ class NetworkVisualizer:
         pygame.init()
         self.width = width
         self.height = height
-        self.screen = pygame.display.set_mode((width, height), pygame.DROPFILE)
+        self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
         pygame.display.set_caption("Image Network Visualizer")
         
         self.nodes = []
@@ -69,6 +73,7 @@ class NetworkVisualizer:
             "Space to anchor/unanchor",
             "Delete/Backspace to remove selected",
             "S to save, L to load",
+            "F11 for fullscreen",
             "Esc to quit"
         ]
 
@@ -132,6 +137,14 @@ class NetworkVisualizer:
         except FileNotFoundError:
             print(f"No save file found at {self.save_file}")
 
+    def toggle_fullscreen(self):
+        if self.screen.get_flags() & pygame.FULLSCREEN:
+            pygame.display.set_mode((self.width, self.height), pygame.RESIZABLE)
+        else:
+            pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)
+        # Re-render the screen after the fullscreen change
+        self.draw_instructions()
+        pygame.display.flip()
 
     def find_node_at_pos(self, x, y):
         for node in self.nodes:
@@ -185,23 +198,9 @@ class NetworkVisualizer:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                elif event.type == pygame.DROPFILE:
-                    image_path = event.file
-                    self.add_image(image_path, mouse_x, mouse_y)
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    self.selected_node = self.find_node_at_pos(mouse_x, mouse_y)
-                elif event.type == pygame.MOUSEBUTTONUP:
-                    if self.selected_node:
-                        target_node = self.find_node_at_pos(mouse_x, mouse_y)
-                        if target_node and target_node != self.selected_node:
-                            self.toggle_connection(self.selected_node, target_node)
-                    self.selected_node = None
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE and self.selected_node:
-                        self.selected_node.anchored = not self.selected_node.anchored
-                    elif event.key in (pygame.K_DELETE, pygame.K_BACKSPACE) and self.selected_node:
-                        self.remove_node(self.selected_node)
-                        self.selected_node = None
+                    if event.key == pygame.K_F11:
+                        self.toggle_fullscreen()  # Fullscreen toggle
                     elif event.key == pygame.K_s:
                         self.save_state()
                     elif event.key == pygame.K_l:
