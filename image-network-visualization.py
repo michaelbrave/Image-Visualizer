@@ -14,7 +14,7 @@ class ImageNode:
         self.radius = radius
         self.base_radius = radius  # Store the original radius
         self.anchored = False
-        self.connections = set()
+        self.connections = set()  # Store only the currently connected nodes
         self.hover_scale = 1.0  # Add scale factor for hover effect
         
         # Load and scale the image
@@ -96,16 +96,18 @@ class NetworkVisualizer:
     
     def remove_node(self, node):
         if node in self.nodes:
+            # Remove all connections involving this node
             for other_node in self.nodes:
-                other_node.connections.discard(node)
+                if node in other_node.connections:
+                    other_node.connections.remove(node)
             self.nodes.remove(node)
     
     def toggle_connection(self, node1, node2):
         if node1 != node2:
             if node2 in node1.connections:
                 # Remove connection
-                node1.connections.discard(node2)
-                node2.connections.discard(node1)
+                node1.connections.remove(node2)
+                node2.connections.remove(node1)
             else:
                 # Add connection
                 node1.connections.add(node2)
@@ -255,10 +257,10 @@ class NetworkVisualizer:
                 image_rect = node.image.get_rect(center=(int(node.x), int(node.y)))
                 self.screen.blit(node.image, image_rect)
                 
-                # Draw anchor indicator
+                # Draw anchor indicator (blue outline)
                 if node.anchored:
-                    pygame.draw.circle(self.screen, (255, 0, 0),
-                                    (int(node.x), int(node.y)), 5)
+                    pygame.draw.circle(self.screen, (0, 120, 255),
+                                    (int(node.x), int(node.y)), int(node.radius + 2), 3)
                 
                 # Highlight selected node
                 if node == self.selected_node:
